@@ -221,6 +221,10 @@ class ClientSettings {
         if (!preg_match('/^[a-zA-Z0-9_\-]+$/', $key)) {
             throw new Exception('Invalid key');
         }
-        return $this->path . '/' . $this->id . '#' . $key . '.php';
+        $path = $this->path . '/' . $this->id . '#' . $key . '.php';
+        if (!is_dir(dirname($path))) {
+            mkdir(dirname($path), 0777, true);
+        }
+        return $path;
     }
 }
