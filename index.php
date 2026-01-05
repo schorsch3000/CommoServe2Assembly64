@@ -111,7 +111,6 @@ foreach ($clientHeaders as $key => $value) {
 curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
 
 $response = curl_exec($ch);
-file_put_contents('debug_curl_response.txt', $response);
 $headerSize = curl_getinfo($ch, CURLINFO_HEADER_SIZE);
 $header = substr($response, 0, $headerSize);
 $body = substr($response, $headerSize);
