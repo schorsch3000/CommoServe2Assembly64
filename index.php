@@ -36,25 +36,20 @@ const client2repo = [
 ];
 $settings = new ClientSettings($clientName, $storagePath);
 
-$client = $settings->get('repo');
-
-if (!in_array($client, array_keys(client2repo))) {
-    $client = 'Ultimate';
-    $settings->set('repo', $client);
-}
-
 $query = $_GET['query'] ?? '';
 
 if (str_contains($query, '(name:"+")')) {
-    $client = 'Ultimate';
-    $settings->set('repo', $client);
-    sendText('You are currently using: ' . client2repo[$settings->get('repo')]);
+    $settings->set('client-id', 'Ultimate');
+    sendText(
+        'You are currently using: ' . client2repo[$settings->get('client-id')],
+    );
 
     exit();
 } elseif (str_contains($query, '(name:"-")')) {
-    $client = 'Commodore';
-    $settings->set('repo', $client);
-    sendText('You are currently using: ' . client2repo[$settings->get('repo')]);
+    $settings->set('client-id', 'Commodore');
+    sendText(
+        'You are currently using: ' . client2repo[$settings->get('client-id')],
+    );
 
     exit();
 } elseif (str_contains($query, '(name:"?")')) {
@@ -67,7 +62,7 @@ if (str_contains($query, '(name:"+")')) {
         'Default is Assembly64.',
         'Settings are stored to your public IP',
         '',
-        'You are currently using: ' . client2repo[$settings->get('repo')],
+        'You are currently using: ' . client2repo[$settings->get('client-id')],
     ]);
     exit();
 }
@@ -84,81 +79,69 @@ $allowedHeaders = [
     'Connection',
 ];
 
-$headers = '';
-$requestHeaders = getallheaders();
-foreach ($allowedHeaders as $header) {
-    if (isset($requestHeaders[$header])) {
-        if ($header === 'Client-Id') {
-            $requestHeaders[$header] = $client;
-        }
-        $headers .= $header . ': ' . $requestHeaders[$header] . "\r\n";
+$ch = curl_init();
+
+$hostIP = '185.187.254.229';
+
+$fullUrl = 'http://' . $hostIP . $uri;
+
+curl_setopt($ch, CURLOPT_URL, $fullUrl);
+curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $method);
+curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
+curl_setopt($ch, CURLOPT_HEADER, true);
+$headers = [
+    'Host: hackerswithstyle.se',
+    'Accept:',
+    'Content-Length:',
+    'Content-Type:',
+];
+$headers[] = 'Client-Id: ' . $settings->get('client-id');
+
+$clientHeaders = (function_exists('apache_request_headers')
+    ? 'apache_request_headers'
+    : 'getallheaders')();
+
+foreach ($clientHeaders as $key => $value) {
+    if (in_array($key, $allowedHeaders)) {
+        $headers[] = $key . ': ' . $value;
     }
 }
 
-$request = "$method $uri HTTP/1.1\r\n" . $headers . "\r\n" . $body;
+curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
 
-$fp = fsockopen('hackerswithstyle.se', 80, $errno, $errstr, 30);
-if (!$fp) {
-    echo "ERROR: $errno - $errstr<br />\n";
-} else {
-    fwrite($fp, $request);
-    $response = '';
-    while (!feof($fp)) {
-        $response .= fgets($fp, 1024);
+$response = curl_exec($ch);
+file_put_contents('debug_curl_response.txt', $response);
+$headerSize = curl_getinfo($ch, CURLINFO_HEADER_SIZE);
+$header = substr($response, 0, $headerSize);
+$body = substr($response, $headerSize);
+$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+curl_close($ch);
+$headerLines = explode("\r\n", $header);
+foreach ($headerLines as $headerLine) {
+    if (stripos($headerLine, 'Content-Length:') === 0) {
+        continue;
     }
-    fclose($fp);
-    $debugHeaders = '';
-    $header_end = strpos($response, "\r\n\r\n");
-    if ($header_end === false) {
-        http_response_code(502);
-        echo 'Bad Gateway: Malformed response from upstream.';
-        exit();
+    if (stripos($headerLine, 'Transfer-Encoding:') === 0) {
+        continue;
     }
-    $header_text = substr($response, 0, $header_end);
-    $body = substr($response, $header_end + 4);
-
-    $header_lines = explode("\r\n", $header_text);
-    $http_sent = false;
-    foreach ($header_lines as $hdr) {
-        if (stripos($hdr, 'HTTP/') === 0) {
-            if (!$http_sent) {
-                header($hdr);
-                $http_sent = true;
-            }
-        } elseif (!empty($hdr)) {
-            header($hdr, false);
-            $debugHeaders .= $hdr . "\n";
-        }
+    if (stripos($headerLine, 'Connection:') === 0) {
+        continue;
     }
-    $is_chunked = false;
-    foreach ($header_lines as $hdr) {
-        if (stripos($hdr, 'Transfer-Encoding: chunked') === 0) {
-            $is_chunked = true;
-            break;
-        }
+    if (stripos($headerLine, 'Content-Encoding:') === 0) {
+        continue;
     }
-    if ($is_chunked) {
-        $body = dechunk($body);
+    if (stripos($headerLine, 'HTTP/') === 0) {
+        header($headerLine);
+        continue;
     }
-    echo $body;
+    if (trim($headerLine) === '') {
+        continue;
+    }
+    header($headerLine);
 }
-
-function dechunk($chunked): string {
-    $body = '';
-    while (true) {
-        $pos = strpos($chunked, "\r\n");
-        if ($pos === false) {
-            break;
-        }
-        $len = hexdec(substr($chunked, 0, $pos));
-        if ($len === 0) {
-            break;
-        }
-        $body .= substr($chunked, $pos + 2, $len);
-        $chunked = substr($chunked, $pos + 2 + $len + 2);
-    }
-    return $body;
-}
+http_response_code($httpCode);
+echo $body;
 
 function sendText($rows) {
     header('Content-Type: application/json');
@@ -172,7 +155,8 @@ function sendText($rows) {
 class ClientSettings {
     private $id;
     private $path;
-    public const DEFAULTS = ['repo' => 'Assembly64'];
+    private $data = [];
+    public const DEFAULTS = ['client-id' => 'Ultimate'];
     public function __construct($id, $path) {
         $this->id = $id;
         $this->path = $path;
@@ -186,17 +170,24 @@ class ClientSettings {
             $storageFile,
             "<?php\nreturn " . var_export($value, true) . ";\n",
         );
+        $this->data[$key] = $value;
     }
     public function get($key) {
         if ($this->id === null) {
             return self::DEFAULTS[$key] ?? null;
         }
+        if (isset($this->data[$key])) {
+            $this->load($key);
+        }
+        return $this->data[$key];
+    }
+    private function load($key) {
         $storageFile = $this->getStoragePath($key);
         if (file_exists($storageFile)) {
-            touch($storageFile);
-            return include $storageFile;
+            $this->data[$key] = include $storageFile;
+        } else {
+            $this->data[$key] = self::DEFAULTS[$key] ?? null;
         }
-        return self::DEFAULTS[$key] ?? null;
     }
     public function remove($key) {
         if ($this->id === null) {
