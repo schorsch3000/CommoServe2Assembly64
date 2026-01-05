@@ -118,23 +118,14 @@ $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 curl_close($ch);
 $headerLines = explode("\r\n", $header);
 foreach ($headerLines as $headerLine) {
-    if (stripos($headerLine, 'Content-Length:') === 0) {
-        continue;
-    }
-    if (stripos($headerLine, 'Transfer-Encoding:') === 0) {
-        continue;
-    }
-    if (stripos($headerLine, 'Connection:') === 0) {
-        continue;
-    }
-    if (stripos($headerLine, 'Content-Encoding:') === 0) {
-        continue;
-    }
-    if (stripos($headerLine, 'HTTP/') === 0) {
-        header($headerLine);
-        continue;
-    }
-    if (trim($headerLine) === '') {
+    if (
+        stripos($headerLine, 'Content-Length:') === 0 ||
+        stripos($headerLine, 'Transfer-Encoding:') === 0 ||
+        stripos($headerLine, 'Connection:') === 0 ||
+        stripos($headerLine, 'Content-Encoding:') === 0 ||
+        stripos($headerLine, 'HTTP/') === 0 ||
+        trim($headerLine) === ''
+    ) {
         continue;
     }
     header($headerLine);
