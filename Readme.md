@@ -4,7 +4,7 @@ This script helps to get the full Assembly64 search that is present in the U64 B
 
 ## What it does:
 
-it basically acts as a proxy between the C64 Ultimate and the assembly64 database and chances the `X-client-Id` header to make the database think that the request is coming from a U64 Board.
+It basically acts as a proxy between the C64 Ultimate and the assembly64 database and chances the `X-client-Id` header to make the database think that the request is coming from a U64 Board.
 
 It also provides help and is able to switch back to CommoServe if desired.
 
@@ -13,6 +13,9 @@ Searching for name=`?` will return help.
 Searching for name=`-` will switch back to CommoServe.
 
 Searching for name=`+` will switch to Assembly64.
+
+It sets the result-Limit to 40 (20 is default) to provide more results.
+The Client can't handle more than 40. Building a more complex paging system is possible, but not implemented yet.
 
 ## Usage
 

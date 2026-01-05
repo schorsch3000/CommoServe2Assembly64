@@ -83,6 +83,9 @@ $ch = curl_init();
 
 $hostIP = '185.187.254.229';
 
+if (str_contains($uri, '/aql') and !str_contains($uri, '/aql/')) {
+    $uri = str_replace('/aql', '/aql/0/40', $uri);
+}
 $fullUrl = 'http://' . $hostIP . $uri;
 
 curl_setopt($ch, CURLOPT_URL, $fullUrl);
