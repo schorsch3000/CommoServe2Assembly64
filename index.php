@@ -166,7 +166,7 @@ class ClientSettings {
         if ($this->id === null) {
             return self::DEFAULTS[$key] ?? null;
         }
-        if (isset($this->data[$key])) {
+        if (!isset($this->data[$key])) {
             $this->load($key);
         }
         return $this->data[$key];
