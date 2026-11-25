@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+osv_prettier -w "$1"

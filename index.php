@@ -62,6 +62,11 @@ if (str_contains($query, '(name:"+")')) {
         'Default is Assembly64.',
         'Settings are stored to your public IP',
         '',
+        'You are able to flip pages by adding',
+        '#<pagenr> to your name',
+        'eg.: searching giana#2 will get you',
+        'page 2 of giana',
+        '',
         'You are currently using: ' . client2repo[$settings->get('client-id')],
     ]);
     exit();
@@ -83,8 +88,17 @@ $ch = curl_init();
 
 $hostIP = '185.187.254.229';
 
+$start = 0;
 if (str_contains($uri, '/aql') and !str_contains($uri, '/aql/')) {
-    $uri = str_replace('/aql', '/aql/0/40', $uri);
+    if (preg_match('/\(name:"[^"]+(#(\d+))"\)/', $query, $matches)) {
+        $start = (int) $matches[2] * 40 - 40;
+        $query = substr($query, 0, strrpos($query, '#')) . '")';
+        $uri =
+            substr($uri, 0, strrpos($uri, '?') + 1) .
+            'query=' .
+            urlencode($query);
+    }
+    $uri = str_replace('/aql', "/aql/$start/40", $uri);
 }
 $fullUrl = 'http://' . $hostIP . $uri;
 
