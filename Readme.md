@@ -6,13 +6,13 @@ This script helps to get the full Assembly64 search that is present in the U64 B
 
 It basically acts as a proxy between the C64 Ultimate and the assembly64 database and chances the `X-client-Id` header to make the database think that the request is coming from a U64 Board.
 
-It also provides help and is able to switch back to CommoServe if desired.
+The search form always gets the Assembly64 presets, with an extra `CommoServe` repository added by the proxy.
+Searching with repository `CommoServe` is sent to CommoServe, every other search goes to Assembly64.
+Downloads always use the Assembly64 client id, which serves CommoServe items as well.
 
 Searching for name=`?` will return help.
 
-Searching for name=`-` will switch back to CommoServe.
-
-Searching for name=`+` will switch to Assembly64.
+Adding `#<pagenr>` to the name (e.g. `giana#2`) returns that page of the results.
 
 It sets the result-Limit to 40 (20 is default) to provide more results.
 The Client can't handle more than 40. Building a more complex paging system is possible, but not implemented yet.
@@ -26,13 +26,6 @@ Install `index.php` onto a php enabled webserver that is configured to:
 - make sure your C64U's network configuration is pointing it to a DNS-Server that resolves hackerswithstyle.se to your webserver's IP.
 
 - maybe change the configuration part ontop of the script.
-    - There are 3 modes:
-        - single-user: the services stores its configuration (currently just which repo is used) as if there is only one oser, any change will reflect for everyone using it
-        - multi-user: the service stores its configuration per user, identified by the IP-Address the Webserver is connected from.
-        - ulti-only: no configuration is stored, the service always uses Assembly64.
-    - storagePath: in mode single-user and multi-user configuration is stored ad files, this path must be writable by the webserver.
-        - it will be created if not present
-        - this path can be accessible via the webbrowser, it's a php file, it will not expose any data.
-    - removeFilesAfterSeconds: configuration files older than this value (in seconds) will be removed eventually.
-        - set to 0 to disable automatic removal.
+    - logRequests: set to `true` to append every request (client IP, original and forwarded URI) to `requests.log` in `logPath`.
+    - logPath: directory for the request log, taken from the environment variable `COMMO2ASSEMBLY_LOG_PATH` (default `../app_data/`, relative to the document root). The Docker image sets it to `/var/log/commo2assembly/`, which is a volume. It must be writable by the webserver and should not be served by it. It will be created if not present.
 - Enjoy!

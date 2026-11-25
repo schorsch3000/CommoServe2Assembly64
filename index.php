@@ -1,73 +1,37 @@
 <?php
 
-$mode = 'multi-user'; // multi-user, single-user or ulti-only
-// multi-user: each IP can select their repo
-// single-user: all users use the same repo
-// ulti-only: all users use Ultimate repo
+$logRequests = false; // append every request to {logPath}/requests.log
 
-$storagePath = 'sessions/'; // storage directory for config-storage (only used in single- and multi-user modes)
-
-$removeFilesAfterSeconds = 60 * 60 * 24 * 7; // 7 days
+// writable, but not served by the webserver
+$logPath = getenv('COMMO2ASSEMBLY_LOG_PATH') ?: '../app_data/';
 
 //END OF CONFIGURATION
 
-if ($removeFilesAfterSeconds > 0 && !random_int(0, 99)) {
-    ClientSettings::cleanup($storagePath, $removeFilesAfterSeconds);
-}
-
-$clientName = null;
-switch ($mode) {
-    case 'ulti-only':
-        break;
-    case 'single-user':
-        $clientName = 'THEONEANDONLY';
-        break;
-    case 'multi-user':
-        $clientName = $_SERVER['REMOTE_ADDR'];
-        break;
-    default:
-        sendText(['ERROR: Invalid mode configuration.']);
-        exit();
-}
-
-const client2repo = [
-    'Ultimate' => 'Assembly64',
-    'Commodore' => 'CommoServe',
-];
-$settings = new ClientSettings($clientName, $storagePath);
-
 $query = $_GET['query'] ?? '';
 
-if (str_contains($query, '(name:"+")')) {
-    $settings->set('client-id', 'Ultimate');
-    sendText(
-        'You are currently using: ' . client2repo[$settings->get('client-id')],
-    );
+// Pseudo repo injected into the presets. Searching it is forwarded to
+// CommoServe, every other search goes to Assembly64.
+const commoServeRepo = 'commoserve';
+$commoServeRepoTerm = 'repo\s*:\s*"?' . commoServeRepo . '\b"?';
+$commoServeRepoPattern =
+    '/\(\s*' .
+    $commoServeRepoTerm .
+    '\s*\)|\b' .
+    $commoServeRepoTerm .
+    '/i';
 
-    exit();
-} elseif (str_contains($query, '(name:"-")')) {
-    $settings->set('client-id', 'Commodore');
-    sendText(
-        'You are currently using: ' . client2repo[$settings->get('client-id')],
-    );
-
-    exit();
-} elseif (str_contains($query, '(name:"?")')) {
+if (str_contains($query, '(name:"?")')) {
     sendText([
         'C64 Ultimate Repo Switcher help:',
-        "  Search for name '+' for Assembly64",
-        "  Search for name '-' for CommoServe",
+        "  Pick repository 'CommoServe'",
+        '  to search CommoServe, any other',
+        '  search uses Assembly64.',
         "  Search for name '?' for this help.",
-        '',
-        'Default is Assembly64.',
-        'Settings are stored to your public IP',
         '',
         'You are able to flip pages by adding',
         '#<pagenr> to your name',
         'eg.: searching giana#2 will get you',
         'page 2 of giana',
-        '',
-        'You are currently using: ' . client2repo[$settings->get('client-id')],
     ]);
     exit();
 }
@@ -76,51 +40,70 @@ $method = $_SERVER['REQUEST_METHOD'];
 $uri = $_SERVER['REQUEST_URI'];
 $body = file_get_contents('php://input');
 
-$allowedHeaders = [
-    'Accept-Encoding',
-    'Host',
-    'User-Agent',
-    'Client-Id',
-    'Connection',
-];
+// Host and Client-Id are set by us, Accept-Encoding is handled by curl.
+$allowedHeaders = ['user-agent', 'connection'];
 
 $ch = curl_init();
 
 $hostIP = '185.187.254.229';
 
-$start = 0;
+// Presets and downloads always work with the Ultimate client id, even for
+// CommoServe items. Only searching CommoServe needs the Commodore one.
+$isPresets = str_starts_with($uri, '/leet/search/aql/presets');
+$clientId = 'Ultimate';
+
 if (str_contains($uri, '/aql') and !str_contains($uri, '/aql/')) {
-    if (preg_match('/\(name:"[^"]+(#(\d+))"\)/', $query, $matches)) {
-        $start = (int) $matches[2] * 40 - 40;
-        $query = substr($query, 0, strrpos($query, '#')) . '")';
-        $uri =
-            substr($uri, 0, strrpos($uri, '?') + 1) .
-            'query=' .
-            urlencode($query);
+    if (preg_match($commoServeRepoPattern, $query)) {
+        // CommoServe does not know our pseudo repo, drop it from the query.
+        $clientId = 'Commodore';
+        $query = preg_replace($commoServeRepoPattern, '', $query);
+        // Remove operators left dangling by that.
+        $op = '(?:&|\band\b)';
+        $query = preg_replace('/' . $op . '(\s*' . $op . ')+/i', '&', $query);
+        $query = preg_replace('/(^|\()\s*' . $op . '\s*/i', '$1', $query);
+        $query = preg_replace('/\s*' . $op . '\s*(\)|$)/i', '$1', $query);
+        $query = preg_replace('/\(\s*\)/', '', $query);
+        $query = trim($query);
     }
-    $uri = str_replace('/aql', "/aql/$start/40", $uri);
+
+    $start = 0;
+    if (preg_match('/\(name:"[^"]*#(\d+)"\)/', $query, $matches)) {
+        $start = max(0, (int) $matches[1] * 40 - 40);
+        $query = preg_replace('/(\(name:"[^"]*)#\d+("\))/', '$1$2', $query);
+    }
+    $params = array_merge($_GET, ['query' => $query]);
+    $uri =
+        str_replace('/aql', "/aql/$start/40", parse_url($uri, PHP_URL_PATH)) .
+        '?' .
+        http_build_query($params);
 }
 $fullUrl = 'http://' . $hostIP . $uri;
+
+if ($logRequests) {
+    logRequest($logPath, $clientId, $uri);
+}
 
 curl_setopt($ch, CURLOPT_URL, $fullUrl);
 curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $method);
 curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
 curl_setopt($ch, CURLOPT_HEADER, true);
+// Let curl negotiate and decompress, Content-Encoding is not passed on.
+curl_setopt($ch, CURLOPT_ENCODING, '');
 $headers = [
     'Host: hackerswithstyle.se',
     'Accept:',
     'Content-Length:',
     'Content-Type:',
 ];
-$headers[] = 'Client-Id: ' . $settings->get('client-id');
+$headers[] = 'Client-Id: ' . $clientId;
 
 $clientHeaders = (function_exists('apache_request_headers')
     ? 'apache_request_headers'
     : 'getallheaders')();
 
 foreach ($clientHeaders as $key => $value) {
-    if (in_array($key, $allowedHeaders)) {
+    if (in_array(strtolower($key), $allowedHeaders)) {
         $headers[] = $key . ': ' . $value;
     }
 }
@@ -128,6 +111,11 @@ foreach ($clientHeaders as $key => $value) {
 curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
 
 $response = curl_exec($ch);
+if ($response === false) {
+    http_response_code(502);
+    sendText(['ERROR: Database not reachable:', curl_error($ch)]);
+    exit();
+}
 $headerSize = curl_getinfo($ch, CURLINFO_HEADER_SIZE);
 $header = substr($response, 0, $headerSize);
 $body = substr($response, $headerSize);
@@ -148,7 +136,50 @@ foreach ($headerLines as $headerLine) {
     header($headerLine);
 }
 http_response_code($httpCode);
+if ($isPresets && $httpCode === 200) {
+    $body = addCommoServeRepo($body);
+}
 echo $body;
+
+function addCommoServeRepo($body) {
+    $presets = json_decode($body, true);
+    if (!is_array($presets)) {
+        return $body;
+    }
+    foreach ($presets as &$preset) {
+        if (($preset['type'] ?? null) !== 'repo') {
+            continue;
+        }
+        array_unshift($preset['values'], [
+            'aqlKey' => commoServeRepo,
+            'name' => 'CommoServe',
+        ]);
+    }
+    unset($preset);
+    return json_encode($presets, JSON_UNESCAPED_SLASHES);
+}
+
+function logRequest($path, $clientId, $uri) {
+    $logFile = $path . '/requests.log';
+    if (!is_dir($path)) {
+        mkdir($path, 0755, true);
+    }
+    // Escape control characters, a request must not forge log lines.
+    $clean = fn($text) => addcslashes(urldecode($text), "\0..\37\177");
+    file_put_contents(
+        $logFile,
+        sprintf(
+            "%s %s %s %s -> %s %s\n",
+            date('c'),
+            $_SERVER['REMOTE_ADDR'],
+            $_SERVER['REQUEST_METHOD'],
+            $clean($_SERVER['REQUEST_URI']),
+            $clientId,
+            $clean($uri),
+        ),
+        FILE_APPEND | LOCK_EX,
+    );
+}
 
 function sendText($rows) {
     header('Content-Type: application/json');
@@ -157,72 +188,4 @@ function sendText($rows) {
         $result[] = ['name' => $row];
     }
     echo json_encode($result);
-}
-
-class ClientSettings {
-    private $id;
-    private $path;
-    private $data = [];
-    public const DEFAULTS = ['client-id' => 'Ultimate'];
-    public function __construct($id, $path) {
-        $this->id = $id;
-        $this->path = $path;
-    }
-    public function set($key, $value) {
-        if ($this->id === null) {
-            return;
-        }
-        $storageFile = $this->getStoragePath($key);
-        file_put_contents(
-            $storageFile,
-            "<?php\nreturn " . var_export($value, true) . ";\n",
-        );
-        $this->data[$key] = $value;
-    }
-    public function get($key) {
-        if ($this->id === null) {
-            return self::DEFAULTS[$key] ?? null;
-        }
-        if (!isset($this->data[$key])) {
-            $this->load($key);
-        }
-        return $this->data[$key];
-    }
-    private function load($key) {
-        $storageFile = $this->getStoragePath($key);
-        if (file_exists($storageFile)) {
-            $this->data[$key] = include $storageFile;
-        } else {
-            $this->data[$key] = self::DEFAULTS[$key] ?? null;
-        }
-    }
-    public function remove($key) {
-        if ($this->id === null) {
-            return;
-        }
-        $storageFile = $this->getStoragePath($key);
-        if (file_exists($storageFile)) {
-            unlink($storageFile);
-        }
-    }
-    static function cleanup($path, $maxAgeSeconds = 60 * 60 * 24) {
-        $now = time();
-        foreach (glob($path . '/*') as $file) {
-            if (is_file($file)) {
-                if ($now - filemtime($file) > $maxAgeSeconds) {
-                    unlink($file);
-                }
-            }
-        }
-    }
-    private function getStoragePath($key) {
-        if (!preg_match('/^[a-zA-Z0-9_\-]+$/', $key)) {
-            throw new Exception('Invalid key');
-        }
-        $path = $this->path . '/' . $this->id . '#' . $key . '.php';
-        if (!is_dir(dirname($path))) {
-            mkdir(dirname($path), 0777, true);
-        }
-        return $path;
-    }
 }

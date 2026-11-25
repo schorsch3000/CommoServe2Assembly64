@@ -18,15 +18,12 @@ There is no build step, test suite or dependency manager.
 
 The whole request flow lives in one file, top to bottom:
 
-1. **Config block** (above `//END OF CONFIGURATION`): `$mode` (`multi-user` keys settings by `REMOTE_ADDR`, `single-user` uses one shared key, `ulti-only` stores nothing and always uses defaults), `$storagePath`, and `$removeFilesAfterSeconds`. Cleanup of old settings runs on about 1% of requests.
-2. **Magic search commands**: the device's search arrives as an AQL query in `$_GET['query']`. A name of `+`, `-` or `?` (matched as the literal substring `(name:"X")`) is answered locally by `sendText()`, which wraps lines as a JSON array of `{name: ...}` objects so the C64U shows them as search results.
-3. **Paging rewrite**: for `/aql` search requests (but not `/aql/...`), the proxy turns the path into `/aql/{start}/40`. A `#N` suffix on the name selects page N and is stripped from the query. 40 is the most results the client can handle.
-4. **Proxy via curl**: only whitelisted client headers (`$allowedHeaders`) are forwarded. The backend's hop-by-hop and length/encoding headers are dropped before the response is relayed.
-5. **`ClientSettings`**: stores each key as a PHP file, `{storagePath}/{clientId}#{key}.php`, which contains `return <var_export>;` and is loaded with `include`. Storing them as PHP files means they are safe to leave web-accessible. Defaults are in `ClientSettings::DEFAULTS`.
+1. **Config block** (above `//END OF CONFIGURATION`): `$logRequests` and `$logPath`. When enabled, `logRequest()` appends one line per request (IP, original URI, chosen client id, forwarded URI, control characters escaped) to `{logPath}/requests.log`. `$logPath` comes from the env var `COMMO2ASSEMBLY_LOG_PATH` (the Dockerfile sets `/var/log/commo2assembly/`) and defaults to `../app_data/`, outside the document root. The proxy is stateless otherwise.
+2. **Help command**: the device's search arrives as an AQL query in `$_GET['query']`. A name of `?` (matched as the literal substring `(name:"?")`) is answered locally by `sendText()`, which wraps lines as a JSON array of `{name: ...}` objects so the C64U shows them as search results.
+3. **Repo routing**: `/aql/presets` is always fetched as `Ultimate`, and `addCommoServeRepo()` adds a pseudo repo (`aqlKey` `commoserve`) to it. An `/aql` search (not `/aql/...`) matching `$commoServeRepoPattern` (`repo:commoserve`, optionally quoted, bracketed only as a pair) has that term and its dangling `&`/`AND` stripped. A query that becomes empty is fine, CommoServe then returns everything. The search is sent as `Commodore`. Everything else, including entries/bin downloads of CommoServe items, is sent as `Ultimate`, which the backend accepts.
+4. **Paging rewrite**: searches are rewritten to `/aql/{start}/40`. A `#N` suffix on the name selects page N and is stripped from the query, also for an empty name (`#2` leaves `(name:"")`, which the backend accepts). 40 is the most results the client can handle.
+5. **Proxy via curl**: only whitelisted client headers (`$allowedHeaders`, compared lower-case) are forwarded. `Host` and `Client-Id` are always set by the proxy. curl negotiates and decompresses the encoding itself (`CURLOPT_ENCODING`), so the backend's `Content-Encoding`, length and hop-by-hop headers are dropped before the response is relayed. If the backend is unreachable, the client gets a 502 with the error as search results.
 
 ## Other files
 
-- `debug.php`: an experimental variant of `index.php` (uses a `QueryStore` and a small result length). It is not deployed by the Dockerfile.
-- `dl`: gitignored CLI script that mirrors the whole backend (`/leet/search/aql/0/0?query=name:%25`, then `entries/` and `bin/` per item) into `./data/`.
 - `.htaccess`: the Apache catch-all rewrite to `/index.php`, which the Dockerfile copies in.
-- `sessions/`: runtime settings storage (gitignored).
